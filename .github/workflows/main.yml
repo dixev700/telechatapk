@@ -1,0 +1,74 @@
+name: Build TeleChat Android APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      telechat_url:
+        description: "Public HTTPS URL of your deployed TeleChat server"
+        required: true
+        type: string
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Find and extract TeleChat ZIP
+        run: |
+          ZIP="$(find . -maxdepth 1 -name 'telechat-zbt-apk-ready*.zip' -print -quit)"
+          if [ -z "$ZIP" ]; then
+            echo "TeleChat ZIP not found"
+            exit 1
+          fi
+
+          rm -rf telechat-source
+          mkdir telechat-source
+          unzip -q "$ZIP" -d telechat-source
+
+          mv telechat-source/telechat-work/* .
+          mv telechat-source/telechat-work/.[!.]* . 2>/dev/null || true
+          mv telechat-source/telechat-work/..?* . 2>/dev/null || true
+
+          rm -rf telechat-source
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Capacitor
+        run: npm install --no-save --ignore-scripts @capacitor/core@8 @capacitor/cli@8 @capacitor/android@8
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Generate Android project
+        env:
+          TELECHAT_URL: ${{ inputs.telechat_url }}
+        run: |
+          npx cap add android
+          npx cap sync android
+
+      - name: Build APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TeleChat-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
